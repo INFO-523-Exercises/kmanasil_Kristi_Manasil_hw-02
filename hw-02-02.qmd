@@ -1,0 +1,466 @@
+---
+title: "Imputing like a Data Scientist"
+subtitle: "Homework 2 Part 2 of 3"
+author: "Kristi Manasil"
+gitId: "kmanasil"
+format: html
+editor: visual
+---
+
+# **Imputing like a Data Scientist**
+
+## **Purpose of this chapter**
+
+**Exploring, visualizing, and imputing outliers and missing values (NAs) in a novel data set and produce publication quality graphs and tables**
+
+**IMPORTANT NOTE**: imputation should only be used when missing data is unavoidable and probably limited to 10% of your data being outliers / missing data (though some argue imputation is necessary between 30-60%). Ask what the cause is for the outlier and missing data.
+
+## **Take-aways**
+
+1.  Load and explore a data set with publication quality tables
+
+2.  Thoroughly diagnose outliers and missing values
+
+3.  Impute outliers and missing values
+
+## **Required Setup**
+
+We first need to prepare our environment with the necessary packages and set a global theme for publishable plots in `ggplot()`
+
+```{r, eval=FALSE}
+# Sets the number of significant figures to two - e.g., 0.01
+options(digits = 2)
+
+# Required package for quick package downloading and loading 
+if (!require(pacman))
+  install.packages("pacman")
+if (!require(BiocManager))
+  install.packages('BiocManager')
+
+# code for troubleshootinh geeting colorblindr to work
+if(!require(devtools))
+  install.packages("devtools")
+devtools::install_github("clauswilke/colorblindr")
+
+pacman::p_load(colorblindr, # Colorblind friendly pallettes
+               cluster, # K cluster analyses
+               dlookr, # Exploratory data analysis
+               formattable, # HTML tables from R outputs
+               ggfortify, # Plotting tools for stats
+               ggpubr, # Publishable ggplots
+               here, # Standardizes paths to data
+               kableExtra, # Alternative to formattable
+               knitr, # Needed to write HTML reports
+               missRanger, # To generate NAs
+               plotly, # Visualization package
+               rattle, # Decision tree visualization
+               rpart, # rpart algorithm
+               tidyverse, # Powerful data wrangling package suite
+               visdat) # Another EDA visualization package
+
+# Set global ggplot() theme
+# Theme pub_clean() from the ggpubr package with base text size = 16
+theme_set(theme_pubclean(base_size = 16)) 
+# All axes titles to their respective far right sides
+theme_update(axis.title = element_text(hjust = 1))
+# Remove axes ticks
+theme_update(axis.ticks = element_blank()) 
+# Remove legend key
+theme_update(legend.key = element_blank())
+```
+
+## **Load and Examine a Data Set**
+
+```{r}
+# load the data. Using the tornado datset from Tidy Tuesday
+tornado_data <- read.csv(here("data", "tornados.csv"))
+
+# This data has over 68k observations. I am going to limit the range to 3 most recent decades and use years 1990 until 2019 
+tornado_data <- tornado_data %>% filter(yr > 1989 & yr < 2020)
+
+
+# add a categorical group - this will be the decade tornado occurred
+tornado_data<- tornado_data %>% mutate(decade = ifelse(yr >= 1990 & yr <= 1999,"1990's",ifelse(yr > 1999 & yr <= 2010,"2000's","2010's")),decade = fct_rev(decade))
+
+# view the data now
+tornado_data %>% head() %>%  formattable()
+```
+
+## **Diagnose your Data**
+
+```{r}
+# Find the proprties of the data
+tornado_data %>% diagnose() %>% formattable()
+```
+
+## **Diagnose Outliers**
+
+There are several numerical variables that have outliers above, let's see what the data look like with and without them
+
+-   Create a table with columns containing outliers
+
+-   Plot outliers in a box plot and histogram
+
+```{r}
+# Table showing outliers
+tornado_data |>
+  diagnose_outlier() |>
+  filter(outliers_ratio > 0) |>  
+  mutate(rate = outliers_mean / with_mean) |>
+  arrange(desc(rate)) |> 
+  select(-outliers_cnt) |>
+  formattable()
+```
+
+```{r}
+tornado_data %>% select(find_outliers(tornado_data)) %>% plot_outlier()
+```
+
+## **Basic Exploration of Missing Values (NAs)**
+
+-   Table showing the extent of NAs in columns containing them
+
+```{r}
+# in order to handle some of these calculations - especially the interactive plotly - I am going to make this data set a little smaller and only use one year of 2019
+
+smaller_tornado_data <- tornado_data %>% filter(yr >= 2019)
+
+# Randomly generate NAs for 30
+na.tornado_data <- smaller_tornado_data |>
+  generateNA(p = 0.3)
+
+# First six rows
+na.tornado_data |>
+head() |>
+  formattable()
+```
+
+```{r}
+# Create the NA table
+na.tornado_data |>
+  plot_na_pareto(only_na = TRUE, plot = FALSE) |>
+  formattable() # Publishable table
+```
+
+-   Plots showing the frequency of missing values
+
+    ```{r}
+    # Plot the insersect of the columns with missing values
+    # This plot visualizes the table above
+    na.tornado_data |>
+      plot_na_pareto(only_na = TRUE)
+    ```
+
+## **Advanced Exploration of Missing Values (NAs)**
+
+-   Intersect plot that shows, for every combination of columns relevant, how many missing values are common
+
+-   Orange boxes are the columns in question
+
+-   x axis (top green bar plots) show the number of missing values in that column
+
+-   y axis (right green bars) show the number of missing values in the columns in orange blocks
+
+```{r}
+# Plot the intersect of the 5 columns with the most missing values
+# This means that some combinations of columns have missing values in the same row
+na.tornado_data |>
+  select(slat, elat, len) |>
+  plot_na_intersect(only_na = TRUE) 
+```
+
+### **Determining if NA Observations are the Same**
+
+-   Missing values can be the same observation across several columns, this is not shown above
+
+-   The visdat package can solve this with the `vis_miss()` function which shows the rows with missing values through `ggplotly()`
+
+-   Here we will show ALL columns with NAs, and you can zoom into individual rows (interactive plot)
+
+-   NOTE: This line will make the HTML rendering take a while...
+
+```{r}
+# Interactive plotly() plot of all NA values to examine every row
+# I had to limit this to 2 features as it would run on my cloud with 3
+na.tornado_data |>
+ select(slat, elat) |>
+ vis_miss() |>
+ ggplotly() 
+```
+
+## **Impute Outliers and NAs**
+
+Removing outliers and NAs can be tricky, but there are methods to do so. I will go over several, and discuss benefits and costs to each.
+
+The principle goal for all imputation is to find the method that does not change the distribution too much (or oddly).
+
+### **Classifying Outliers**
+
+Before imputing outliers, you will want to diagnose whether it's they are natural outliers or not. We will be looking at "Insulin" for example across Age_group, because there are outliers and several NAs, which we will impute below.
+
+```{r}
+# Box plot
+tornado_data %>% # Set the simulated normal data as a data frame
+  ggplot(aes(x = slat, y = decade, fill = decade)) + # Create a ggplot
+  geom_boxplot(width = 0.5, outlier.size = 2, outlier.alpha = 0.5) +
+  xlab("Starting Latitude") +  # Relabel the x axis label
+  ylab("Decade") + # Remove the y axis label
+  scale_fill_OkabeIto() + # Change the color scheme for the fill criteria
+  theme(legend.position = "none")  # Remove the legend 
+```
+
+Now let's say that we want to impute extreme values and remove outliers that don't make sense, such as Insulin levels \> 600 mg/dL: values greater than this induce a diabetic coma.
+
+We remove outliers using `imputate_outlier()` and replace them with values that are estimates based on the existing data
+
+-   `mean`: arithmetic mean
+
+-   `median`: median
+
+-   `mode`: mode
+
+-   `capping`: Impute the upper outliers with 95 percentile, and impute the bottom outliers with 5 percentile - aka Winsorizing
+
+### **Mean Imputation**
+
+The mean of the observed values for each variable is computed and the outliers for that variable are imputed by this mean
+
+```{r}
+# Raw summary, output suppressed
+# tornadoes less than 10 miles
+mean_out_imp_len <- tornado_data |>
+  select(len) |>
+  filter( len < 10) |>
+  imputate_outlier(len, method = "mean")
+
+# Output showing the summary statistics of our imputation
+mean_out_imp_len |>
+  summary() 
+```
+
+```{r}
+# Visualization of the mean imputation
+mean_out_imp_len |>
+  plot()
+```
+
+### **Median Imputation**
+
+The median of the observed values for each variable is computed and the outliers for that variable are imputed by this median
+
+```{r}
+# Raw summary, output suppressed
+# tornadoes less than 10 miles 
+med_out_imp_len <- tornado_data |>
+  select(len) |>
+  filter( len < 10) |>
+  imputate_outlier(len, method = "median")
+
+# Output showing the summary statistics of our imputation
+mean_out_imp_len |>
+  summary() 
+```
+
+```{r}
+med_out_imp_len %>% plot()
+```
+
+#### Pros & Cons of Using the Mean or Median Imputation
+
+**Pros**:
+
+-   Easy and fast.
+
+-   Works well with small numerical datasets.
+
+**Cons**:
+
+-   Doesn't factor the correlations between variables. It only works on the column level.
+
+-   Will give poor results on encoded categorical variables (do **NOT** use it on categorical variables).
+
+-   Not very accurate.
+
+-   Doesn't account for the uncertainty in the imputations.
+
+### **Mode Imputation**
+
+The mode of the observed values for each variable is computed and the outliers for that variable are imputed by this mode
+
+```{r}
+# Raw summary, output suppressed
+# tornadoes less than 10 miles
+mode_out_imp_len <- tornado_data |>
+  select(len) |>
+  filter( len < 10) |>
+  imputate_outlier(len, method = "mode")
+
+# Output showing the summary statistics of our imputation
+mode_out_imp_len |>
+  summary() 
+```
+
+```{r}
+# Visualization of the mode imputation
+mode_out_imp_len %>% plot()
+```
+
+#### Pros & Cons of Using the Mode Imputation
+
+**Pros**:
+
+-   Works well with categorical variables.
+
+**Cons**:
+
+-   It also doesn't factor the correlations between variables.
+
+-   It can introduce bias in the data.
+
+### **Capping Imputation (aka Winsorizing)**
+
+The Percentile Capping is a method of Imputing the outlier values by replacing those observations outside the lower limit with the value of 5th percentile and those that lie above the upper limit, with the value of 95th percentile of the same dataset.
+
+```{r}
+# Raw summary, output suppressed
+# tornadoes less than 10 miles
+cap_out_imp_len <- tornado_data |>
+  select(len) |>
+  filter( len < 10) |>
+  imputate_outlier(len, method = "capping")
+
+# Output showing the summary statistics of our imputation
+cap_out_imp_len |>
+  summary() 
+```
+
+```{r}
+# Visualization of the capping imputation
+cap_out_imp_len %>% plot()
+```
+
+#### Pros and Cons of Capping
+
+**Pros**:
+
+-   Not influenced by extreme values
+
+**Cons**:
+
+-   Capping only modifies the smallest and largest values slightly. This is generally not a good idea since it means we're just modifying data values for the sake of modifications.
+
+-   If no extreme outliers are present, Winsorization may be unnecessary.
+
+## **Imputing NAs**
+
+I will only be addressing a subset of methods for NA imputation using `imputate_na()` (but note you can use mean, median, and mode as well):
+
+1.  `knn`: K-nearest neighbors (KNN)
+
+2.  `rpart`: Recursive Partitioning and Regression Trees (rpart)
+
+3.  `mice`: Multivariate Imputation by Chained Equations (MICE)
+
+Since our normal `dataset` has no NA values, we will use the `na.dataset` we created earlier.
+
+### **K-Nearest Neighbor (KNN) Imputation**
+
+KNN is a machine learning algorithm that classifies data by similarity. This in effect clusters data into similar groups. The algorithm predicts values of new data to replace NA values based on how closely they resembles training data points, such as by comparing across other columns.
+
+Here's a visual example using the `clara()` function from the `cluster` package to run a KNN algorithm on our `dataset`, where three clusters are created by the algorithm.
+
+```{r}
+# remove loss, mag columns due to na values
+smaller_tornado_data <- smaller_tornado_data %>% select(-c("loss", "mag"))
+# KNN plot of our dataset without categories
+autoplot(clara(smaller_tornado_data[-5], 3)) +
+  scale_color_OkabeIto()
+```
+
+```{r}
+# I had to remove the character features from the data but still wont run
+na.tornado_data2 <- na.tornado_data %>% select(-c("date", "time", "tz", "datetime_utc", "st"))
+
+# Raw summary, output suppressed
+knn_na_imp_len <- na.tornado_data2 %>% 
+  imputate_na(len, method = "knn")
+
+# Plot showing the results of our imputation
+knn_na_imp_len |>
+  plot()
+
+# describe not working
+```
+
+#### Pros & Cons of Using KNN Imputation
+
+**Pro**:
+
+-   Possibly much more accurate than mean, median, or mode imputation for some data sets.
+
+**Cons**:
+
+-   KNN is computationally expensive because it stores the entire training dataset into computer memory.
+
+-   KNN is very sensitive to outliers, so you would have to imputate these first.
+
+### **Recursive Partitioning and Regression Trees (rpart)**
+
+rpart is a decision tree machine learning algorithm that builds classification or regression models through a two stage process, which can be thought of as binary trees. The algorithm splits the data into subsets, which move down other branches of the tree until a termination criteria is reached.
+
+For example, if we are missing a value for `Age_group` a first decision could be whether the associated `Age` is within a series of yes or no criteria
+
+```{r}
+# Raw summary, output suppressed
+rpart_na_imp_len <- na.tornado_data2 |>
+  imputate_na(len, method = "rpart")
+
+# Plot showing the results of our imputation
+rpart_na_imp_len |>
+  plot()
+
+```
+
+#### Pros & Cons of Using rpart Imputation
+
+**Pros**:
+
+-   Good for categorical data because approximations are easier to compare across categories than continuous variables.
+
+-   Not sensitive to outliers.
+
+**Cons**:
+
+-   Can over fit the data as they grow.
+
+-   Speed decreases with more data columns.
+
+### **Multivariate Imputation by Chained Equations (MICE)**
+
+MICE is an algorithm that fills missing values multiple times, hence dealing with uncertainty better than other methods. This approach creates multiple copies of the data that can then be analyzed and then pooled into a single dataset.
+
+NOTE: You will have to set a random seed (e.g., 123) since the MICE algorithm pools several simulated imputations. Without setting a seed, a different result will occur after each simulation.
+
+```{r}
+# Raw summary, output suppressed
+mice_na_imp_len <- na.tornado_data2 |>
+  imputate_na(len, method = "mice", seed = 123)
+```
+
+```{r}
+# Plot showing the results of our imputation
+mice_na_imp_len |>
+  plot()
+```
+
+#### Pros & Cons of MICE Imputation
+
+**Pros**:
+
+-   Multiple imputations are more accurate than a single imputation.
+
+-   The chained equations are very flexible to data types, such as categorical and ordinal.
+
+**Cons**:
+
+-   You have to round the results for ordinal data because resulting data points are too great or too small (floating-points).

@@ -1,0 +1,284 @@
+---
+title: "Data Transformer"
+subtitle: "Homework 2 Part 1 of 3"
+author: "Kristi Manasil"
+gitId: "kmanasil"
+format: html
+editor: visual
+---
+
+# **Transforming like a Data... Transformer**
+
+## **Purpose of this chapter**
+
+**Using data transformation to correct non-normality in numerical data**
+
+## **Take-aways**
+
+1.  Load and explore a data set with publication quality tables
+
+2.  Quickly diagnose non-normality in data
+
+3.  Data transformation
+
+4.  Prepare an HTML summary report showcasing data transformations
+
+## **Required Setup**
+
+We first need to prepare our environment with the necessary packages
+
+```{r}
+# Sets the number of significant figures to two - e.g., 0.01
+options(digits = 2)
+
+# Required package for quick package downloading and loading 
+if (!require(pacman))  
+  install.packages("pacman")
+
+# Downloads and load required packages
+pacman::p_load(dlookr, # Exploratory data analysis
+               forecast, # Needed for Box-Cox transformations
+               formattable, # HTML tables from R outputs
+               here, # Standardizes paths to data
+               kableExtra, # Alternative to formattable
+               knitr, # Needed to write HTML reports
+               missRanger, # To generate NAs
+               tidyverse) # Powerful data wrangling package suite
+```
+
+## **Load and Examine a Data Set**
+
+-   Load data and view
+
+-   Examine columns and data types
+
+-   Examine data normality
+
+-   Describe properties of data
+
+    This document will be using the tornadoes data set provided by Tidy Tuesday from May 16th 2023. Detailed descriptions about the data columns can be found at https://github.com/rfordatascience/tidytuesday/blob/master/data/2023/2023-05-16/readme.md
+
+```{r}
+# Load data
+tornado_data <- read.csv(here("data", "tornados.csv"))
+
+glimpse(tornado_data)
+
+
+```
+
+```{r}
+# This data has over 68k observations. I am going to limit the range to 3 most recent decades and use years 1990 until 2019 
+tornado_data <- tornado_data %>% filter(yr > 1989 & yr < 2020)
+
+
+# add a categorical group - this will be the decade tornado occurred
+tornado_data<- tornado_data %>% mutate(decade = ifelse(yr >= 1990 & yr <= 1999,"1990's",ifelse(yr > 1999 & yr <= 2010,"2000's","2010's")),decade = fct_rev(decade))
+
+# view the data now
+tornado_data %>% head() %>%  formattable()
+```
+
+### **Data Normality**
+
+Normal distributions (bell curves) are a common data assumptions for many [hypothesis testing statistics](https://en.wikipedia.org/wiki/Statistical_hypothesis_testing), in particular [parametric statistics](https://en.wikipedia.org/wiki/Parametric_statistics). Deviations from normality can either strongly skew the results or reduce the power to detect a [significant statistical difference](https://en.wikipedia.org/wiki/Statistical_significance).
+
+Here are the distribution properties to know and consider:
+
+-   The mean, median, and mode are the same value.
+
+-   Distribution symmetry at the mean.
+
+-   Normal distributions can be described by the mean and standard deviation.
+
+Here's an example using the slat column in our tornado data. This column is the starting latitude in decimal degrees.
+
+```{r}
+# I am not sure how to add the horizontal line used in the example
+# below is a histogram that has both the mean(red) and median(yellow) and the sd in dotted black
+hist(tornado_data$slat, col='steelblue')
+abline(v = mean(tornado_data$slat), col = 'red', lwd = 3)
+abline(v = median(tornado_data$slat), col = 'yellow', lwd = 2)
+abline(v = mean(tornado_data$slat)+sd(tornado_data$slat)/2, col = 'black', lwd = 2, lty='dashed')
+abline(v = mean(tornado_data$slat)-sd(tornado_data$slat)/2, col = 'black', lwd = 2, lty='dashed')
+legend(x='topright', c("Mean", "Median", "Standard Deviation"),
+       col=c("red", "yellow", "black"), lwd=c(2,2,2))
+```
+
+```{r}
+# values shown in plot above
+mean(tornado_data$slat)
+median(tornado_data$slat)
+sd(tornado_data$slat)
+```
+
+### **Describing Properties of our Data (Refined)**
+
+#### Skewness
+
+The symmetry of the distribution
+
+See [Introduction 4.3](https://gchism94.github.io/EDA_In_R_Book/intro.html#sec-DistShape) for more information about these values
+
+```{r}
+tornado_data %>% select(slat, slon, elat, elon, len) %>% 
+  describe() %>% 
+  select(described_variables, skewness) %>% 
+  formattable()
+```
+
+## **Testing Normality (Accelerated)**
+
+-   Q-Q plots
+
+-   Testing overall normality of two columns
+
+-   Testing normality of groups
+
+**Note** that you can also use `normality()` to run Shapiro-Wilk tests, but since this test is not viable at `N < 20`, I recommend Q-Q plots.
+
+#### Q-Q Plots
+
+Plots of the quartiles of a target data set against the predicted quartiles from a normal distribution.
+
+Notably, `plot_normality()` will show you the logaritmic and skewed transformations (more below)
+
+```{r}
+# I am using two (slat and slon) with fairly normal distribution and the len (length in miles on ground) that is skewed
+tornado_data %>% plot_normality(slat, slon, len)
+```
+
+## **Normality within Groups**
+
+Looking within Age_group at the subgroup normality
+
+#### Q-Q Plots
+
+```{r}
+# plotting normality for slat and len by decade
+tornado_data %>% group_by(decade) %>% 
+  select(slat, len) %>% 
+  plot_normality()
+```
+
+## **Transforming Data**
+
+Your data could be more easily interpreted with a transformation, since not all relationships in nature follow a linear relationship - i.e., many biological phenomena follow a power law (or logarithmic curve), where they do not scale linearly.
+
+We will try to transform the len column with through several approaches and discuss the pros and cons of each. First however, we will remove `0` values, because len values are impossible...
+
+```{r}
+# lets only consider tornados that were on the ground for more than 1 mile
+len_data <- tornado_data %>% filter(len > 1)
+```
+
+### **Square-root, Cube-root, and Logarithmic Transformations**
+
+Resolving Skewness using `transform()`.
+
+"sqrt": [square-root transformation](https://en.wikipedia.org/wiki/Square_root). � **(moderate skew)**
+
+"log": [log transformation](https://en.wikipedia.org/wiki/Logarithm). ���(�) **(greater skew)**
+
+"log+1": log transformation. ���(�+1). Used for values that contain 0.
+
+"1/x": [inverse transformation](https://en.wikipedia.org/wiki/Inverse_function). 1/� **(severe skew)**
+
+"x\^2": [squared transformation](https://en.wikipedia.org/wiki/Quadratic_function). �2
+
+"x\^3": [cubed transformation](https://en.wikipedia.org/wiki/Cubic_function). �3
+
+We will compare the `sqrt`, `log+1`, `1/x` (inverse), `x^2`, and `x^3` transformations. Note that you would have to add a constant to use the `log` transformation, so it is easier to use the `log+1` instead. You however need to add a constant to both the `sqrt` and `1/x` transformations because they don't include zeros and will otherwise skew the results. *Here we removed zeros a priori*.
+
+#### Square-root Transformation
+
+```{r}
+sqrtLen <- transform(len_data$len, method ='sqrt')
+
+summary(sqrtLen)
+```
+
+```{r}
+sqrtLen %>% plot()
+```
+
+pretty ugly
+
+#### Logarithmic (+1) Transformation
+
+```{r}
+logLen <- transform(len_data$len, method = "log+1")
+
+summary(logLen)
+```
+
+```{r}
+logLen %>%  plot()
+```
+
+still pretty ugly
+
+#### Inverse Transformation
+
+```{r}
+invLen <- transform(len_data$len, method = "1/x")
+
+summary(invLen)
+```
+
+```{r}
+invLen %>% plot()
+```
+
+um, yeah that isnt any better
+
+#### Squared Transformation
+
+```{r}
+sqrdLen <- transform(len_data$len, method = "x^2")
+
+summary(sqrdLen)
+```
+
+```{r}
+sqrdLen %>%  plot()
+```
+
+nope
+
+#### Cubed Transformation
+
+```{r}
+cubeLen <- transform(len_data$len, method = "x^3")
+
+summary(cubeLen)
+```
+
+```{r}
+cubeLen %>% plot()
+```
+
+definitely not
+
+### **Box-cox Transformation**
+
+There are several transformations, each with it's own "criteria", and they don't always fix extremely skewed data. Instead, you can just choose the [Box-Cox transformation](https://en.wikipedia.org/wiki/Box%E2%80%93Cox_distribution) which searches for the the best lambda value that maximizes the log-likelihood (basically, what power transformation is best). The benefit is that you should have normally distributed data after, but the power relationship might be pretty abstract (i.e., what would a transformation of x\^0.12 be interpreted as in your system?..)
+
+```{r}
+boxCoxLen <- transform(len_data$len, method = "Box-Cox")
+
+summary(boxCoxLen)
+```
+
+```{r}
+boxCoxLen %>%  plot()
+```
+
+still pretty funky but is the best of the transforms. But this variable was heavily skewed to the right to begin with.
+
+## **Produce an HTML Transformation Summary**
+
+```{r}
+# this doesnt seem to work?
+# transformation_web_report(tornado_data)
+```
