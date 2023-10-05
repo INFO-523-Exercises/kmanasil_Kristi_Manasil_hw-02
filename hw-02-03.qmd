@@ -79,6 +79,7 @@ ferris_wheel_data <- ferris_wheel_data %>% select(c("country", "number_of_cabins
 # remove rows with na values
 ferris_wheel_data <- ferris_wheel_data[complete.cases(ferris_wheel_data),]
 
+# keep only the countries with multiple observations
 ferris_wheel_data <- ferris_wheel_data %>% filter(country == "Japan" | country == "USA"|country == "China")
 
 
@@ -98,11 +99,15 @@ correlate(ferris_wheel_data) |>
   formattable()
 ```
 
+There seems to be a strong positive correlation between seating capacity and passengers per cabin, between seating capacity and hourly capacity and between passengers per cabin and hourly capacity.
+
 ```{r}
 # Correlation matrix of numerical variables
 ferris_wheel_data %>% 
 plot_correlate()
 ```
+
+Here we can see the strong correlation in the darker blues between these variables in a plot.
 
 ## **Visualize Correlations within Groups**
 
@@ -112,18 +117,22 @@ If we have groups that we will compare later on, it is a good idea to see how ea
 ferris_wheel_data %>% group_by(country) %>% plot_correlate()
 ```
 
+In these plots it is interesting to see that all variables show correlation to each other in Japan. And that a weak negative correlation between number of cabins and all variables exists in Ferris wheels in China.
+
 This is great, we have our correlations within groups! However, the correlation matrices aren't always the most intuitive, so let's plot!
 
-We will be using the `ggpairs()` function within the `GGally` package. Specifically, we are looking at the correlations between number of cabins and hourly capacity.
+We will be using the `ggpairs()` function within the `GGally` package. Specifically, we are looking at the correlations between number passengers per cabins and hourly capacity.
 
 ```{r}
 ferris_wheel_data %>% 
-  dplyr::select(country, number_of_cabins, hourly_capacity) %>% ggpairs(aes(color=country, alpha = 0.5)) +
+  dplyr::select(country, passengers_per_cabin, hourly_capacity) %>% ggpairs(aes(color=country, alpha = 0.5)) +
   theme(strip.background = element_blank())+
   scale_fill_OkabeIto()+
   scale_color_OkabeIto()
 
 ```
+
+Notice how there appears to be a big outlier in China for both hourly capacity and passengers per cabin.
 
 ## **Describe and Visualize Relationships Based on Target Variables**
 
@@ -142,7 +151,7 @@ The relationships below will have the formula relationship `target ~ predictor`.
 # I have done this already 
 
 # The numerical predictor variable that we want
-num <- target_by(ferris_wheel_data, number_of_cabins)
+num <- target_by(ferris_wheel_data, passengers_per_cabin)
 
 # Relating the variable of interest to the numerical target variable
 num_num <- relate(num, seating_capacity)
@@ -151,10 +160,14 @@ num_num <- relate(num, seating_capacity)
 summary(num_num)
 ```
 
+Here the p-value is significant showing that there is strong positive correlation.
+
 ```{r}
 # Plotting the linear relationship
 plot(num_num)
 ```
+
+Visualization of the linear relationship between these two variables.
 
 ### **Numerical Target Variables: Categorical Variable of Interest**
 
@@ -162,7 +175,7 @@ Formula: `seating_capacity (numerical response) ~ country (categorical predictor
 
 ```{r}
 # The categorical predictor variable that we want
-num <- target_by(ferris_wheel_data, seating_capacity) 
+num <- target_by(ferris_wheel_data, number_of_cabins) 
 
 # We need to change Group to a factor
 num$country <- as.factor(num$country)
@@ -173,6 +186,8 @@ num_cat <- relate(num, country)
 # Summary of the ANOVA analysis - the same as the summary from anova(lm(Formula))
 summary(num_cat)
 ```
+
+Here we see a significant p value for the USA and the number of cabins. Fun fact the Ferris Wheel was created for the Midway at the 1893 World's Fair in Chicago as a grand attraction to rival the Eiffel Tower from the previous World's Fair in Paris.
 
 ```{r}
 plot(num_cat) + 

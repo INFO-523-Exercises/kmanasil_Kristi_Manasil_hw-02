@@ -62,6 +62,7 @@ pacman::p_load(dlookr, # Exploratory data analysis
 # Load data
 tornado_data <- read.csv(here("data", "tornados.csv"))
 
+# inspect the data
 glimpse(tornado_data)
 
 
@@ -105,6 +106,8 @@ legend(x='topright', c("Mean", "Median", "Standard Deviation"),
        col=c("red", "yellow", "black"), lwd=c(2,2,2))
 ```
 
+The data is fairly normally distributed based on the starting latitude of the recorded tornado.
+
 ```{r}
 # values shown in plot above
 mean(tornado_data$slat)
@@ -127,6 +130,8 @@ tornado_data %>% select(slat, slon, elat, elon, len) %>%
   formattable()
 ```
 
+The variable of tornado length (len) is the only one that shows a distinct skewness.
+
 ## **Testing Normality (Accelerated)**
 
 -   Q-Q plots
@@ -148,24 +153,29 @@ Notably, `plot_normality()` will show you the logaritmic and skewed transformati
 tornado_data %>% plot_normality(slat, slon, len)
 ```
 
+The above plots show that both slat and slon are pretty much normally distributed as the points in the plot follow are fairly straight line. The len points do not follow the straight line thus we can conclude it is not normally distributed but skewed.
+
 ## **Normality within Groups**
 
-Looking within Age_group at the subgroup normality
+Looking within decade at the subgroup normality
 
 #### Q-Q Plots
 
 ```{r}
 # plotting normality for slat and len by decade
+# I am using slat and len (one normal and one not)
 tornado_data %>% group_by(decade) %>% 
   select(slat, len) %>% 
   plot_normality()
 ```
 
+The Q-Q plots show that starting latitude was normally distributed in all 3 decades in the data. However the length was skewed in all 3 decades.
+
 ## **Transforming Data**
 
 Your data could be more easily interpreted with a transformation, since not all relationships in nature follow a linear relationship - i.e., many biological phenomena follow a power law (or logarithmic curve), where they do not scale linearly.
 
-We will try to transform the len column with through several approaches and discuss the pros and cons of each. First however, we will remove `0` values, because len values are impossible...
+We will try to transform the len column with through several approaches and discuss the pros and cons of each. First however, we will remove `0` values
 
 ```{r}
 # lets only consider tornados that were on the ground for more than 1 mile
@@ -202,7 +212,7 @@ summary(sqrtLen)
 sqrtLen %>% plot()
 ```
 
-pretty ugly
+pretty ugly, still highly skewed
 
 #### Logarithmic (+1) Transformation
 
@@ -216,7 +226,7 @@ summary(logLen)
 logLen %>%  plot()
 ```
 
-still pretty ugly
+still pretty ugly, slightly better but still skewed
 
 #### Inverse Transformation
 
@@ -230,7 +240,7 @@ summary(invLen)
 invLen %>% plot()
 ```
 
-um, yeah that isnt any better
+Well I am not sure if this is less ugly, I would say it is still pretty skewed but the peak moved slightly closer to the center
 
 #### Squared Transformation
 
@@ -244,7 +254,7 @@ summary(sqrdLen)
 sqrdLen %>%  plot()
 ```
 
-nope
+nope, this made the skew worse.
 
 #### Cubed Transformation
 
@@ -274,7 +284,7 @@ summary(boxCoxLen)
 boxCoxLen %>%  plot()
 ```
 
-still pretty funky but is the best of the transforms. But this variable was heavily skewed to the right to begin with.
+still pretty funky but is the best of the transforms and closest to a normal distribution that could be used for a linear relationsip. But this variable was heavily skewed to the right to begin with.
 
 ## **Produce an HTML Transformation Summary**
 
